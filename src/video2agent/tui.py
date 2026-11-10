@@ -134,14 +134,20 @@ def _tk_dialog(kind):
         if kind == "many":
             return list(filedialog.askopenfilenames(
                 parent=root, title="Select videos (Ctrl or Shift for several)", filetypes=types))
-        got = filedialog.askdirectory(parent=root, title="Select a folder of videos")
+        if kind == "dest":
+            os.makedirs(cli.DATA_DIR, exist_ok=True)
+            got = filedialog.askdirectory(
+                parent=root, initialdir=cli.DATA_DIR, mustexist=False,
+                title="Save in which folder? Pick or create one (Cancel = straight into data)")
+        else:
+            got = filedialog.askdirectory(parent=root, title="Select a folder of videos")
         return [got] if got else []
     finally:
         root.destroy()
 
 
 def pick(kind="one"):
-    """Open the Windows file-explorer dialog. kind: one, many or folder. Returns a list of paths."""
+    """Open the Windows file-explorer dialog. kind: one, many, folder or dest. Returns a list of paths."""
     try:
         return [os.path.normpath(p) for p in _tk_dialog(kind)]
     except Exception:
@@ -149,6 +155,29 @@ def pick(kind="one"):
     print("  The file picker could not open. Type or drag a path here:")
     path = ask().strip('"')
     return [path] if path else []
+
+
+def dest_label(dest):
+    """How a save folder is shown: relative to data/ when it is inside it."""
+    folder = cli.resolve_dest(dest)
+    try:
+        rel = os.path.relpath(folder, cli.DATA_DIR)
+    except ValueError:
+        return folder
+    if rel == ".":
+        return "data"
+    return folder if rel.startswith("..") else os.path.join("data", rel)
+
+
+def pick_dest():
+    """Ask which folder to save in, starting at data/. Returns None for data/ itself."""
+    print("  Now pick the folder to save in (the window opens at the data folder;")
+    print("  you can make a new folder there). Cancel saves straight into data.")
+    got = pick("dest")
+    dest = got[0] if got else None
+    if dest and os.path.normcase(os.path.abspath(dest)) == os.path.normcase(cli.DATA_DIR):
+        dest = None
+    return dest
 
 
 def open_path(path):
@@ -167,13 +196,13 @@ def open_folder(path):
 
 
 def processed_videos():
-    """Folders in data/ that hold a finished digest, newest first."""
+    """Finished video folders anywhere under data/, as paths relative to it, newest first."""
     out = []
-    if os.path.isdir(cli.DATA_DIR):
-        for name in os.listdir(cli.DATA_DIR):
-            digest = os.path.join(cli.DATA_DIR, name, "video_digest.md")
-            if os.path.isfile(digest):
-                out.append((os.path.getmtime(digest), name))
+    for folder, subdirs, files in os.walk(cli.DATA_DIR):
+        if "video_digest.md" in files:
+            out.append((os.path.getmtime(os.path.join(folder, "video_digest.md")),
+                        os.path.relpath(folder, cli.DATA_DIR)))
+            subdirs[:] = []          # a video's own frames/ and parts/ are not categories
     return [name for _t, name in sorted(out, reverse=True)]
 
 
@@ -220,7 +249,8 @@ def process_screen(base, settings):
         print("  Not a file: %s" % video)
         return pause()
 
-    out_dir = cli.default_out_dir(video)
+    dest = pick_dest()
+    out_dir = cli.default_out_dir(video, dest)
     subs = None if settings["force_whisper"] else cli.find_sidecar(video)
     header("PROCESS ONE VIDEO")
     print()
@@ -239,7 +269,7 @@ def process_screen(base, settings):
         return
 
     a = with_settings(base, settings)
-    a.video = video
+    a.video, a.dest = video, dest
     print()
     batch.keep_awake(True)
     try:
@@ -293,6 +323,7 @@ def queue_screen(base, settings):
         for n, i in enumerate(waiting, 1):
             print("   %2d. %-50s %s" % (n, os.path.basename(i["video"])[:50],
                                        cli.hms(i["duration"]) if i.get("duration") else ""))
+            print("       -> %s" % dest_label(i.get("dest")))
         total = sum(i.get("duration") or 0 for i in waiting)
         if waiting:
             print()
@@ -308,7 +339,7 @@ def queue_screen(base, settings):
                 if i["status"] == "failed" and i.get("error"):
                     print("           %s" % i["error"][:60])
         print()
-        print("  [A] Add videos      [F] Add every video in a folder")
+        print("  [A] Add videos      [F] Add every video in a folder   (each asks where to save)")
         print("  [S] Start now       [T] Start at a set time (e.g. 23:30)")
         print("  [R] Remove one      [C] Clear the results list    [Enter] Back")
         if note:
@@ -319,11 +350,15 @@ def queue_screen(base, settings):
         if choice == "a":
             print("  A file explorer window is opening. Hold Ctrl or Shift to pick several...")
             got = pick("many")
-            note = "Added %d video(s)." % batch.add(got) if got else ""
+            if got:
+                dest = pick_dest()
+                note = "Added %d video(s), saving in %s." % (batch.add(got, dest=dest), dest_label(dest))
         elif choice == "f":
             print("  A file explorer window is opening. Pick the folder...")
             got = pick("folder")
-            note = "Added %d video(s)." % batch.add(got) if got else ""
+            if got:
+                dest = pick_dest()
+                note = "Added %d video(s), saving in %s." % (batch.add(got, dest=dest), dest_label(dest))
         elif choice == "r":
             n = ask("  Remove which number? ")
             note = "Removed." if n.isdigit() and batch.remove(int(n)) else "No such number."

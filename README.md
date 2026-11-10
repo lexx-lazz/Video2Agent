@@ -10,8 +10,10 @@ end to end and report what matters, with timestamps you can check.
 
 ## What it produces
 
-Every video gets one folder, `data/<video name>/`, inside the project. Processing
-`talk.mp4` writes `data/talk/`, and that folder is everything an agent needs:
+Every video gets one folder named after it, inside the project's `data` folder.
+Processing `talk.mp4` writes `data/talk/`, and that folder is everything an agent
+needs. You can group videos: each time you pick a video, a second window asks
+which folder to save in, so a course can live in `data/EE-337/talk/`.
 
 | File | What |
 |---|---|
@@ -116,5 +118,6 @@ while a board that is being written on is captured again as it fills in.
 | `--queue` | | process the saved queue, then exit |
 | `--at HH:MM` | | wait until this time before starting a queue or batch |
 | `--part-minutes` | `15` | length of each part file |
-| `--out DIR` | `data/<video name>/` | output folder |
+| `--dest FOLDER` | `data` | folder to save in; output goes to `FOLDER/<video name>/`. A plain name means a folder inside `data` |
+| `--out DIR` | | exact output folder, instead of `<dest>/<video name>/` |
 | `--version` | | print the version and build date |

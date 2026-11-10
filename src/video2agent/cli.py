@@ -48,9 +48,17 @@ def log(msg):
             pass
 
 
+class Fatal(SystemExit):
+    """Exits with status 1 like sys.exit(1), but keeps the reason for the queue log."""
+
+    def __init__(self, message):
+        super().__init__(1)
+        self.message = message
+
+
 def die(msg):
     log("ERROR: " + msg)
-    raise SystemExit(1)
+    raise Fatal(msg)
 
 
 def run(cmd):
@@ -410,9 +418,16 @@ instead of guessing.
 """
 
 
-def default_out_dir(video):
-    """data/<video file name without extension>/ inside the project."""
-    return os.path.join(DATA_DIR, os.path.splitext(os.path.basename(video))[0])
+def resolve_dest(dest):
+    """A category folder to save in. Relative names live under data/; empty means data/ itself."""
+    if not dest:
+        return DATA_DIR
+    return os.path.normpath(dest if os.path.isabs(dest) else os.path.join(DATA_DIR, dest))
+
+
+def default_out_dir(video, dest=None):
+    """<dest or data>/<video file name without extension>/ - one folder per video."""
+    return os.path.join(resolve_dest(dest), os.path.splitext(os.path.basename(video))[0])
 
 
 def build_parser():
@@ -424,7 +439,10 @@ def build_parser():
     ap.add_argument("--at", metavar="HH:MM", help="with --queue or several videos: wait until this time")
     ap.add_argument("--version", action="version",
                     version="video2agent %s (%s)" % (APP_VERSION, BUILD_DATE))
-    ap.add_argument("--out", help="output folder (default: data/<video name>/ in the project)")
+    ap.add_argument("--dest", metavar="FOLDER",
+                    help="category folder to save in; output goes to FOLDER/<video name>/. "
+                         "A plain name such as \"EE-337\" means data/EE-337")
+    ap.add_argument("--out", help="exact output folder, instead of <dest>/<video name>/")
     ap.add_argument("--subs", help="subtitle file to use (.srt/.vtt)")
     ap.add_argument("--force-whisper", action="store_true", help="ignore subtitle files, transcribe locally")
     ap.add_argument("--model", default="small", help="faster-whisper model (tiny/base/small/medium/large-v3)")
@@ -451,7 +469,7 @@ def process(a):
         die("video not found: " + video)
     FFMPEG, FFPROBE = find_tool("ffmpeg"), find_tool("ffprobe")
 
-    out_dir = os.path.abspath(a.out) if a.out else default_out_dir(video)
+    out_dir = os.path.abspath(a.out) if a.out else default_out_dir(video, getattr(a, "dest", None))
     frames_dir = os.path.join(out_dir, "frames")
     parts_dir = os.path.join(out_dir, "parts")
     for d in (frames_dir, parts_dir):
@@ -488,6 +506,9 @@ def process(a):
     times = candidate_times(segs, scenes, duration, a.silence_interval, a.min_gap)
     log("%d scene changes, %d candidate frames" % (len(scenes), len(times)))
     frames = extract_frames(video, times, frames_dir, a.width)
+    if times and not frames:
+        die("no screenshots could be read from the video (0 of %d). Was the file moved or "
+            "renamed while it was being processed? %s" % (len(times), video))
     before = len(frames)
     frames = dedupe_frames(frames, frames_dir, a.hash_dist, a.min_change)
     log("kept %d frames (%d near-duplicates dropped)" % (len(frames), before - len(frames)))
@@ -560,7 +581,7 @@ def main():
     if a.queue or len(videos) > 1 or start_at:
         # unattended: everything named goes on the saved queue, then the queue runs
         if videos:
-            log("added %d video(s) to the queue" % batch.add(videos))
+            log("added %d video(s) to the queue" % batch.add(videos, dest=a.dest))
         _done, failed, log_path = batch.run_queue(a, start_at)
         log("log saved to " + log_path)
         sys.exit(1 if failed else 0)

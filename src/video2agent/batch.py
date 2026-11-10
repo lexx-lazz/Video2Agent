@@ -42,8 +42,11 @@ def expand(paths):
     return out
 
 
-def add(paths, probe=True):
-    """Append videos as pending. Returns how many were added (already-waiting ones are skipped)."""
+def add(paths, probe=True, dest=None):
+    """Append videos as pending, to be saved under dest (a category folder; None = data/).
+
+    Returns how many were added (already-waiting ones are skipped).
+    """
     items = load()
     waiting = {os.path.normcase(i["video"]) for i in items if i["status"] == "pending"}
     added = 0
@@ -57,7 +60,7 @@ def add(paths, probe=True):
                 duration = cli.probe_duration(video)
             except SystemExit:
                 pass
-        items.append({"video": video, "status": "pending", "duration": duration,
+        items.append({"video": video, "status": "pending", "duration": duration, "dest": dest,
                       "added": datetime.datetime.now().isoformat(timespec="seconds")})
         waiting.add(os.path.normcase(video))
         added += 1
@@ -152,6 +155,7 @@ def run_queue(base, start_at=None):
             cli.log("===== %d of %d: %s =====" % (n, max(total, n), os.path.basename(item["video"])))
             a = argparse.Namespace(**vars(base))
             a.video, a.out, a.subs = item["video"], None, None
+            a.dest = item.get("dest")
             t0 = time.time()
             try:
                 item["out"] = cli.process(a)
@@ -161,7 +165,8 @@ def run_queue(base, start_at=None):
                 cli.log("stopped by you - this video stays in the queue")
                 break
             except SystemExit as e:
-                item["status"], item["error"] = "failed", str(e) or "stopped with an error"
+                item["status"] = "failed"
+                item["error"] = getattr(e, "message", None) or "stopped with an error"
                 failed += 1
             except Exception as e:
                 item["status"], item["error"] = "failed", "%s: %s" % (type(e).__name__, e)

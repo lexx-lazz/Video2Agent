@@ -168,3 +168,58 @@ def test_preview_pairs_lines_with_frames_and_escapes_text():
     assert 'class="block" data-t="0.00"' in page and 'data-seek="92.00"' in page
     assert "a &lt; b" in page and "file:///C:/v/talk.mp4" in page and "(no speech)" in page
     assert "__" not in page.replace("__proto__", "")
+
+
+def test_save_folder_is_a_category_with_one_folder_per_video(tmp_path, monkeypatch):
+    import os
+    monkeypatch.setattr(cli, "DATA_DIR", str(tmp_path))
+    assert cli.default_out_dir("x/Coulombs Law -1.mp4") == os.path.join(str(tmp_path), "Coulombs Law -1")
+    assert cli.default_out_dir("x/a.mp4", "EE-337") == os.path.join(str(tmp_path), "EE-337", "a")
+    elsewhere = str(tmp_path.parent / "elsewhere")
+    assert cli.default_out_dir("x/a.mp4", elsewhere) == os.path.join(elsewhere, "a")
+
+
+def test_queue_remembers_where_each_video_is_saved(tmp_path, monkeypatch):
+    from video2agent import batch
+    import argparse
+    monkeypatch.setattr(batch, "QUEUE_FILE", str(tmp_path / "queue.json"))
+    monkeypatch.setattr(batch, "LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setattr(batch, "keep_awake", lambda on: None)
+    for n in ("a.mp4", "b.mp4"):
+        (tmp_path / n).write_bytes(b"")
+    batch.add([str(tmp_path / "a.mp4")], probe=False, dest="EE-337")
+    batch.add([str(tmp_path / "b.mp4")], probe=False)
+    seen = []
+    monkeypatch.setattr(cli, "process", lambda a: seen.append((a.video[-5:], a.dest)) or "out")
+    batch.run_queue(argparse.Namespace(model="small", dest="ignored"))
+    assert seen == [("a.mp4", "EE-337"), ("b.mp4", None)]
+
+
+def test_queue_records_the_reason_a_video_failed(tmp_path, monkeypatch):
+    from video2agent import batch
+    import argparse
+    monkeypatch.setattr(batch, "QUEUE_FILE", str(tmp_path / "queue.json"))
+    monkeypatch.setattr(batch, "LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setattr(batch, "keep_awake", lambda on: None)
+    gone = tmp_path / "gone.mp4"
+    gone.write_bytes(b"")
+    batch.add([str(gone)], probe=False)
+    gone.unlink()                                   # renamed or moved after being queued
+    monkeypatch.setattr(cli, "find_tool", lambda name: name)
+    batch.run_queue(argparse.Namespace(model="small", dest=None, out=None))
+    item = batch.load()[0]
+    assert item["status"] == "failed" and "video not found" in item["error"]
+
+
+def test_library_finds_videos_inside_category_folders(tmp_path, monkeypatch):
+    import os
+    from video2agent import tui
+    monkeypatch.setattr(cli, "DATA_DIR", str(tmp_path))
+    for rel in ("loose", os.path.join("EE-337", "lecture 1"), os.path.join("EE-337", "lecture 2")):
+        os.makedirs(str(tmp_path / rel / "frames"))
+        (tmp_path / rel / "video_digest.md").write_text("x", encoding="utf-8")
+    os.makedirs(str(tmp_path / "EE-337" / "unfinished" / "frames"))
+    assert sorted(tui.processed_videos()) == sorted(
+        ["loose", os.path.join("EE-337", "lecture 1"), os.path.join("EE-337", "lecture 2")])
+    assert tui.dest_label(None) == "data"
+    assert tui.dest_label(str(tmp_path / "EE-337")) == os.path.join("data", "EE-337")
