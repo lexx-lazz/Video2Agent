@@ -1,0 +1,14 @@
+# The LAST matching line wins, so the catch-all goes first and the specific
+# overrides follow it.
+
+# Normalise in the repo, native in the working tree.
+* text=auto
+
+# Batch files MUST be CRLF. cmd.exe mis-parses LF-only batch files — comments and
+# parenthesised blocks merge, producing errors like
+# "'M' is not recognized as an internal or external command".
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Shell scripts must stay LF even when checked out on Windows.
+*.sh  text eol=lf

@@ -1,0 +1,79 @@
+# Secrets — NEVER commit
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+secrets/
+
+# Real configuration carries machine paths, real names and often credentials. The tracked
+# artefact is the .example beside it, with every key and comment intact and every value
+# blanked — so the FORMAT is recoverable from the repo even though the data never is. The
+# most recent copy of the real file lives in backups/, which is how the VALUES are recovered.
+config.json
+config.local.*
+/config/*.toml
+/config/*.json
+!*.example.*
+!/config/*.example.*
+
+# Agent material. Local to this machine, and STATE.md routinely quotes real names and paths.
+# CLAUDE.md must stay at the repo ROOT — the tooling finds it there by name — so it is
+# ignored rather than moved.
+CLAUDE.md
+AGENTS.md
+HANDOFF*.md
+.claude/
+.codex/
+.cursor/
+.aider*
+
+# Runtime data, logs, backups and scratch — all accumulate personal or machine-specific
+# content. Root-anchored (`/data/`) ON PURPOSE: a bare `data/` also matches a source package
+# named data/ anywhere in the tree, which silently hides real application code from git, and
+# a commit made under that rule would not reproduce the running application.
+/data/
+/logs/
+/backups/
+/output/
+/scratch/
+/archive/
+/testing-data/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# What the tool writes next to a video: transcripts and screenshots of whatever was watched.
+*_agent/
+
+# Build output
+build/
+dist/
+out/
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
