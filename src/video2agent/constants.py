@@ -5,5 +5,5 @@ this file, because a build that disagrees with itself about its own version is w
 one with no version at all. `/push` bumps both.
 """
 
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.1.2"
 BUILD_DATE = "2026-11-10"

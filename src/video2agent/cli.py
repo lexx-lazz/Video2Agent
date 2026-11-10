@@ -34,13 +34,23 @@ FFPROBE = "ffprobe"
 
 # ----------------------------------------------------------------- helpers
 
+LOG_FILE = None     # when set, every log line is also appended here (queue runs)
+
+
 def log(msg):
-    print("[video2agent] " + msg, flush=True)
+    line = "[video2agent] " + msg
+    print(line, flush=True)
+    if LOG_FILE:
+        try:
+            with open(LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(time.strftime("%H:%M:%S ") + line + "\n")
+        except OSError:
+            pass
 
 
 def die(msg):
-    print("[video2agent] ERROR: " + msg, file=sys.stderr)
-    sys.exit(1)
+    log("ERROR: " + msg)
+    raise SystemExit(1)
 
 
 def run(cmd):
@@ -153,31 +163,71 @@ def find_sidecar(video):
     return None
 
 
+def regroup_words(words, max_len=9.0, gap=0.7, soft_len=4.0):
+    """Turn (start, end, text) words into short timed segments.
+
+    Batched Whisper returns ~25 s chunks. A line that long cannot be tied to one
+    screenshot, so cut at pauses, at sentence ends once long enough, and at max_len.
+    """
+    segs, cur = [], None
+    for start, end, text in words:
+        if not text.strip():
+            continue
+        if cur is not None:
+            sentence_end = cur["text"].rstrip()[-1:] in ".?!"
+            if (start - cur["end"] >= gap
+                    or end - cur["start"] > max_len
+                    or (sentence_end and cur["end"] - cur["start"] >= soft_len)):
+                segs.append(cur)
+                cur = None
+        if cur is None:
+            cur = {"start": float(start), "end": float(end), "text": text.strip()}
+        else:
+            cur["end"] = float(end)
+            cur["text"] += text
+    if cur is not None:
+        segs.append(cur)
+    for s in segs:
+        s["text"] = " ".join(s["text"].split())
+        s["end"] = max(s["end"], s["start"] + 0.1)
+    return segs
+
+
 def whisper_transcribe(video, model_name, language, duration):
     try:
-        from faster_whisper import WhisperModel
+        from faster_whisper import WhisperModel, BatchedInferencePipeline
     except ImportError:
-        die("faster-whisper is not installed. Run: pip install -r requirements.txt")
-    log("loading Whisper model '%s' (CPU, int8) - first run downloads it" % model_name)
-    model = WhisperModel(model_name, device="cpu", compute_type="int8")
-    segments, info = model.transcribe(video, language=language, vad_filter=True,
-                                      beam_size=5, word_timestamps=True)
-    log("language: %s (p=%.2f)" % (info.language, info.language_probability))
-    out, t0, last = [], time.time(), 0.0
+        die("faster-whisper is not installed. Run: run.bat deps")
+    threads = max(1, (os.cpu_count() or 4) // 2)
+    log("loading Whisper model '%s' (CPU, int8, %d threads) - first run downloads it"
+        % (model_name, threads))
+    model = WhisperModel(model_name, device="cpu", compute_type="int8", cpu_threads=threads)
+    # Batched decoding is several times faster on CPU than one window at a time.
+    segments, info = BatchedInferencePipeline(model=model).transcribe(
+        video, language=language, batch_size=8, word_timestamps=True)
+    if language:
+        log("language: %s (set)" % info.language)
+    else:
+        log("language: %s (auto-detected, p=%.2f)" % (info.language, info.language_probability))
+        if info.language_probability < 0.9:
+            log("  WARNING: low confidence. A wrong guess is slow and inaccurate -")
+            log("  set the language in the menu or pass --language (e.g. en).")
+    words, out, t0, last = [], [], time.time(), 0.0
     for s in segments:
-        text = s.text.strip()
-        if text:
+        if s.words:
             # segment-level times get stretched across silences; word times do not
-            start, end = float(s.start), float(s.end)
-            if s.words:
-                start, end = float(s.words[0].start), float(s.words[-1].end)
-            out.append({"start": start, "end": max(end, start + 0.1), "text": text})
+            words += [(w.start, w.end, w.word) for w in s.words]
+        elif s.text.strip():
+            out.append({"start": float(s.start), "end": float(s.end), "text": s.text.strip()})
         if time.time() - last > 5:
             last = time.time()
-            pct = 100.0 * s.end / duration if duration else 0
-            log("  transcribed %s / %s (%.0f%%, %.0fs elapsed)"
-                % (hms(s.end), hms(duration), pct, time.time() - t0))
-    log("transcription done in %.0fs, %d segments" % (time.time() - t0, len(out)))
+            pct = min(100.0, 100.0 * s.end / duration) if duration else 0
+            el = time.time() - t0
+            eta = el * (100.0 - pct) / pct if pct > 1 else 0
+            log("  transcribed %s / %s (%.0f%%, %s elapsed, about %s left)"
+                % (hms(s.end), hms(duration), pct, hms(el), hms(eta)))
+    out = sorted(out + regroup_words(words), key=lambda x: x["start"])
+    log("transcription done in %s, %d segments" % (hms(time.time() - t0), len(out)))
     return out
 
 
@@ -256,24 +306,39 @@ def extract_frames(video, times, frames_dir, width):
     return out
 
 
-def dedupe_frames(frames, frames_dir, max_dist):
-    """Drop a frame when it looks the same as the last one kept."""
+def changed_percent(a, b):
+    """Percent of pixels that clearly differ between two small grayscale thumbnails."""
+    from PIL import ImageChops
+    hist = ImageChops.difference(a, b).histogram()
+    return 100.0 * sum(hist[48:]) / float(a.size[0] * a.size[1])
+
+
+def dedupe_frames(frames, frames_dir, max_dist, min_change=0.5):
+    """Drop a frame when it looks the same as the last one kept.
+
+    The perceptual hash catches "same slide". It is blind to a new line of
+    handwriting or one more equation, so a frame also survives when more than
+    min_change percent of its pixels differ from the last one kept.
+    """
     try:
         from PIL import Image
         import imagehash
     except ImportError:
         log("pillow/imagehash missing - skipping duplicate removal")
         return frames
-    kept, last = [], None
+    kept, last, last_small = [], None, None
     for f in frames:
         path = os.path.join(frames_dir, f["file"])
         with Image.open(path) as im:
             h = imagehash.phash(im)
+            small = im.convert("L").resize((160, 90))
         if last is not None and (h - last) <= max_dist:
-            os.remove(path)
-            continue
+            f["change"] = round(changed_percent(small, last_small), 2)
+            if f["change"] < min_change:
+                os.remove(path)
+                continue
         kept.append(f)
-        last = h
+        last, last_small = h, small
     return kept
 
 
@@ -323,6 +388,7 @@ This folder is a text + image rendering of the video **{name}** (length {dur}).
 - `frames/` - the screenshots. **Open the images**, do not rely on the transcript alone:
   slides, code, charts and UI often carry information nobody says out loud.
 - `transcript.srt`, `segments.json` - the raw transcript and frame index.
+- `preview.html` - a page for a person to check the output against the video. Ignore it.
 
 Transcript source: {source}. {source_note}
 
@@ -351,20 +417,27 @@ def default_out_dir(video):
 
 def build_parser():
     ap = argparse.ArgumentParser(prog="video2agent", description="Video -> timestamped transcript + screenshots for AI agents")
-    ap.add_argument("video", nargs="?", help="video file; leave out for the interactive menu")
+    ap.add_argument("video", nargs="*",
+                    help="video file(s) or folder(s), processed in order; leave out for the menu")
+    ap.add_argument("--queue", action="store_true",
+                    help="process the saved queue (built in the menu), then exit")
+    ap.add_argument("--at", metavar="HH:MM", help="with --queue or several videos: wait until this time")
     ap.add_argument("--version", action="version",
                     version="video2agent %s (%s)" % (APP_VERSION, BUILD_DATE))
     ap.add_argument("--out", help="output folder (default: data/<video name>/ in the project)")
     ap.add_argument("--subs", help="subtitle file to use (.srt/.vtt)")
     ap.add_argument("--force-whisper", action="store_true", help="ignore subtitle files, transcribe locally")
     ap.add_argument("--model", default="small", help="faster-whisper model (tiny/base/small/medium/large-v3)")
-    ap.add_argument("--language", default=None, help="language code, e.g. en (default: auto-detect)")
+    ap.add_argument("--language", default="en",
+                    help="spoken language code (default: en); 'auto' detects it, slower and less safe")
     ap.add_argument("--scene", type=float, default=0.3, help="scene-change threshold 0-1")
     ap.add_argument("--silence-interval", type=float, default=30.0, help="seconds between frames during silence")
     ap.add_argument("--min-gap", type=float, default=2.0, help="minimum seconds between frames")
     ap.add_argument("--min-segment", type=float, default=4.0, help="merge transcript fragments shorter than this")
     ap.add_argument("--width", type=int, default=1024, help="screenshot width in px")
     ap.add_argument("--hash-dist", type=int, default=6, help="perceptual-hash distance treated as duplicate")
+    ap.add_argument("--min-change", type=float, default=0.5,
+                    help="keep a look-alike frame when this percent of the picture changed (new writing)")
     ap.add_argument("--part-minutes", type=float, default=15.0, help="length of each part file")
     return ap
 
@@ -372,6 +445,7 @@ def build_parser():
 def process(a):
     """Run the whole pipeline for a.video and return the output folder."""
     global FFMPEG, FFPROBE
+    t_start = time.time()
     video = os.path.abspath(a.video)
     if not os.path.isfile(video):
         die("video not found: " + video)
@@ -400,7 +474,8 @@ def process(a):
         log("no audio track - screenshots only")
         segs, source, note = [], "none (video has no audio track)", ""
     else:
-        segs = whisper_transcribe(video, a.model, a.language, duration)
+        language = None if a.language in (None, "", "auto") else a.language
+        segs = whisper_transcribe(video, a.model, language, duration)
         source = "local speech recognition (faster-whisper `%s`)" % a.model
         note = "Names, jargon and numbers may be misheard - cross-check against the screenshots."
     segs = [s for s in segs if s["start"] < duration + 1]
@@ -414,7 +489,7 @@ def process(a):
     log("%d scene changes, %d candidate frames" % (len(scenes), len(times)))
     frames = extract_frames(video, times, frames_dir, a.width)
     before = len(frames)
-    frames = dedupe_frames(frames, frames_dir, a.hash_dist)
+    frames = dedupe_frames(frames, frames_dir, a.hash_dist, a.min_change)
     log("kept %d frames (%d near-duplicates dropped)" % (len(frames), before - len(frames)))
 
     # --- output
@@ -454,7 +529,12 @@ def process(a):
         name=name, dur=hms(duration), part_min=("%g" % a.part_minutes), nparts=written,
         source=source, source_note=note))
 
-    log("done -> " + out_dir)
+    from . import preview
+    write(os.path.join(out_dir, "preview.html"), preview.build(
+        video, name, "Length %s - %d screenshots - %d transcript segments - %s"
+        % (hms(duration), len(frames), len(segs), source.replace("`", "")), blocks))
+
+    log("done in %s -> %s" % (hms(time.time() - t_start), out_dir))
     log("%d screenshots, %d transcript segments" % (len(frames), len(segs)))
     return out_dir
 
@@ -465,9 +545,31 @@ def main():
     except Exception:
         pass
     a = build_parser().parse_args()
-    if a.video:
+    from . import batch
+    videos = batch.expand(a.video)
+    for v in videos:
+        if not os.path.isfile(v):
+            log("skipping, not found: " + v)
+    if len(videos) > 1:
+        videos = [v for v in videos if os.path.isfile(v)]
+    start_at = None
+    if a.at:
+        start_at = batch.parse_clock(a.at)
+        if not start_at:
+            die("--at needs a time like 23:30")
+    if a.queue or len(videos) > 1 or start_at:
+        # unattended: everything named goes on the saved queue, then the queue runs
+        if videos:
+            log("added %d video(s) to the queue" % batch.add(videos))
+        _done, failed, log_path = batch.run_queue(a, start_at)
+        log("log saved to " + log_path)
+        sys.exit(1 if failed else 0)
+    elif videos:
+        a.video = videos[0]
         process(a)
         log('next: cd into that folder and run:  claude "Follow AGENT_PROMPT.md"')
+    elif a.video:
+        die("no video files found in: " + ", ".join(a.video))
     else:
         from .tui import run_menu
         run_menu(a)

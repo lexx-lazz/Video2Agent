@@ -6,6 +6,8 @@ REM  subcommands.
 REM
 REM  Usage:  run.bat            -> interactive menu with a file picker
 REM          run.bat <video> [options] -> process one video directly
+REM          run.bat <videos or folder> -> process several, one after another
+REM          run.bat --queue --at 23:30 -> run the saved queue at a set time
 REM          run.bat test       -> run the test suite (offline, deterministic)
 REM          run.bat safety     -> secret / .env hygiene audit
 REM          run.bat deps       -> reinstall dependencies into .venv

@@ -88,3 +88,83 @@ def test_banner_rows_line_up_and_fit_the_box():
     rows = tui.banner_lines()
     assert len(rows) == 5 and len({len(r) for r in rows}) == 1
     assert len(rows[0]) + 2 <= tui.WIDTH - 4
+
+
+def test_long_whisper_chunks_are_cut_into_short_timed_lines():
+    # 20 s of continuous words, then a pause, then a short sentence
+    words = [(i * 0.5, i * 0.5 + 0.4, " w%d" % i) for i in range(40)]
+    words += [(25.0, 25.4, " After"), (25.5, 26.0, " pause.")]
+    segs = cli.regroup_words(words)
+    assert all(s["end"] - s["start"] <= 9.5 for s in segs)
+    assert segs[-1] == {"start": 25.0, "end": 26.0, "text": "After pause."}
+    assert " ".join(s["text"] for s in segs[:-1]) == " ".join("w%d" % i for i in range(40))
+
+
+def test_sentence_end_closes_a_line_once_it_is_long_enough():
+    words = [(0, 2, " One"), (2, 4.5, " two."), (4.6, 6, " Three"), (6, 7, " four.")]
+    assert [s["text"] for s in cli.regroup_words(words)] == ["One two.", "Three four."]
+
+
+def test_new_handwriting_survives_duplicate_removal(tmp_path):
+    from PIL import Image, ImageDraw
+    board = Image.new("RGB", (640, 360), "white")
+    ImageDraw.Draw(board).rectangle([0, 0, 640, 40], fill="gray")
+    names = []
+    for i, extra in enumerate([False, False, True]):
+        im = board.copy()
+        d = ImageDraw.Draw(im)
+        d.line([60, 120, 420, 120], fill="black", width=5)
+        if extra:
+            d.line([60, 200, 420, 200], fill="black", width=5)   # one more written line
+        names.append("f_%d.jpg" % i)
+        im.save(str(tmp_path / names[-1]))
+    frames = [{"time": float(i), "file": n, "reason": "speech"} for i, n in enumerate(names)]
+    kept = cli.dedupe_frames(frames, str(tmp_path), 6, 0.5)
+    assert [f["file"] for f in kept] == ["f_0.jpg", "f_2.jpg"]
+
+
+def test_queue_add_run_order_and_failure_isolation(tmp_path, monkeypatch):
+    from video2agent import batch
+    import argparse
+    monkeypatch.setattr(batch, "QUEUE_FILE", str(tmp_path / "queue.json"))
+    monkeypatch.setattr(batch, "LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.setattr(cli, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(batch, "keep_awake", lambda on: None)
+    folder = tmp_path / "vids"
+    folder.mkdir()
+    for n in ("b.mp4", "a.mp4", "c.mkv", "notes.txt"):
+        (folder / n).write_bytes(b"")
+    assert batch.add([str(folder)], probe=False) == 3
+    assert batch.add([str(folder / "a.mp4")], probe=False) == 0      # already waiting
+    seen = []
+
+    def fake_process(a):
+        seen.append(a.video[-5:])
+        if a.video.endswith("b.mp4"):
+            raise RuntimeError("boom")
+        return "out"
+    monkeypatch.setattr(cli, "process", fake_process)
+    done, failed, log_path = batch.run_queue(argparse.Namespace(model="small"))
+    assert seen == ["a.mp4", "b.mp4", "c.mkv"] and (done, failed) == (2, 1)
+    assert [i["status"] for i in batch.load()] == ["done", "failed", "done"]
+    assert batch.pending() == [] and "boom" in open(log_path, encoding="utf-8").read()
+
+
+def test_clock_times_roll_to_tomorrow_when_already_past():
+    import datetime
+    from video2agent import batch
+    now = datetime.datetime(2026, 11, 10, 22, 0)
+    assert batch.parse_clock("23:30", now) == datetime.datetime(2026, 11, 10, 23, 30)
+    assert batch.parse_clock("0630", now) == datetime.datetime(2026, 11, 11, 6, 30)
+    assert batch.parse_clock("soon", now) is None and batch.parse_clock("25:00", now) is None
+
+
+def test_preview_pairs_lines_with_frames_and_escapes_text():
+    from video2agent import preview
+    blocks = [{"time": 4.0, "file": "f_000004.jpg", "reason": "speech",
+               "lines": [{"start": 0.0, "end": 8.0, "text": "a < b"}]},
+              {"time": 92.0, "file": "f_000092.jpg", "reason": "speech", "lines": []}]
+    page = preview.build(r"C:\v\talk.mp4", "talk.mp4", "meta", blocks)
+    assert 'class="block" data-t="0.00"' in page and 'data-seek="92.00"' in page
+    assert "a &lt; b" in page and "file:///C:/v/talk.mp4" in page and "(no speech)" in page
+    assert "__" not in page.replace("__proto__", "")
