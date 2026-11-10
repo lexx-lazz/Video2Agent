@@ -4,7 +4,8 @@ REM  Video2Agent launcher — the ONE way to start this project.
 REM  Do not add start.bat / dev.bat / build.bat. New capabilities go here as
 REM  subcommands.
 REM
-REM  Usage:  run.bat <video> [options] -> process a video
+REM  Usage:  run.bat            -> interactive menu with a file picker
+REM          run.bat <video> [options] -> process one video directly
 REM          run.bat test       -> run the test suite (offline, deterministic)
 REM          run.bat safety     -> secret / .env hygiene audit
 REM          run.bat deps       -> reinstall dependencies into .venv

@@ -10,7 +10,8 @@ end to end and report what matters, with timestamps you can check.
 
 ## What it produces
 
-Running it on `talk.mp4` writes a `talk_agent/` folder next to the video:
+Every video gets one folder, `data/<video name>/`, inside the project. Processing
+`talk.mp4` writes `data/talk/`, and that folder is everything an agent needs:
 
 | File | What |
 |---|---|
@@ -31,12 +32,23 @@ time `run.bat` is used.
 
 ## Use
 
-    run.bat "C:\path\to\talk.mp4"
+Double-click `run.bat`, or run it with no arguments, for the menu:
 
-Then hand the folder to an agent:
+    [1] Pick a video and process it      opens a file explorer window
+    [2] Processed videos                 open any finished folder
+    [3] Open the data folder
+    [4] Whisper model                    tiny / base / small / medium / large-v3
+    [5] Transcript                       use subtitles if found, or always transcribe
 
-    cd "C:\path\to\talk_agent"
+When a video finishes, the menu shows its folder and the two lines that hand it
+to an agent:
+
+    cd "data\talk"
     claude "Follow AGENT_PROMPT.md"
+
+To skip the menu, pass the video directly:
+
+    run.bat "C:\path\to\talk.mp4"
 
 Other launcher commands:
 
@@ -72,5 +84,5 @@ before are then dropped, so a slide that stays up for five minutes appears once.
 | `--hash-dist` | `6` | how similar two frames must be to count as duplicates; lower keeps more |
 | `--width` | `1024` | screenshot width in pixels |
 | `--part-minutes` | `15` | length of each part file |
-| `--out DIR` | | output folder |
+| `--out DIR` | `data/<video name>/` | output folder |
 | `--version` | | print the version and build date |

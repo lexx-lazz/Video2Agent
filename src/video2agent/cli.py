@@ -2,9 +2,10 @@
 """video2agent - turn a video into a timestamped transcript + screenshots digest
 that an AI agent can read end to end.
 
+    run.bat                          interactive menu with a file picker
     run.bat <video> [options]        (or: python -m video2agent <video> [options])
 
-Writes <video>_agent/ next to the video:
+Writes data/<video name>/ inside the project:
     video_digest.md   timestamp + screenshot + what was said while it showed
     parts/part_NN.md  the digest in 15-minute chunks
     frames/           screenshots (JPEG)
@@ -23,6 +24,9 @@ import sys
 import time
 
 from .constants import APP_VERSION, BUILD_DATE
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DATA_DIR = os.path.join(ROOT, "data")
 
 FFMPEG = "ffmpeg"
 FFPROBE = "ffprobe"
@@ -340,13 +344,17 @@ instead of guessing.
 """
 
 
-def main():
-    global FFMPEG, FFPROBE
-    ap = argparse.ArgumentParser(description="Video -> timestamped transcript + screenshots for AI agents")
-    ap.add_argument("video")
+def default_out_dir(video):
+    """data/<video file name without extension>/ inside the project."""
+    return os.path.join(DATA_DIR, os.path.splitext(os.path.basename(video))[0])
+
+
+def build_parser():
+    ap = argparse.ArgumentParser(prog="video2agent", description="Video -> timestamped transcript + screenshots for AI agents")
+    ap.add_argument("video", nargs="?", help="video file; leave out for the interactive menu")
     ap.add_argument("--version", action="version",
                     version="video2agent %s (%s)" % (APP_VERSION, BUILD_DATE))
-    ap.add_argument("--out", help="output folder (default: <video>_agent next to the video)")
+    ap.add_argument("--out", help="output folder (default: data/<video name>/ in the project)")
     ap.add_argument("--subs", help="subtitle file to use (.srt/.vtt)")
     ap.add_argument("--force-whisper", action="store_true", help="ignore subtitle files, transcribe locally")
     ap.add_argument("--model", default="small", help="faster-whisper model (tiny/base/small/medium/large-v3)")
@@ -358,19 +366,18 @@ def main():
     ap.add_argument("--width", type=int, default=1024, help="screenshot width in px")
     ap.add_argument("--hash-dist", type=int, default=6, help="perceptual-hash distance treated as duplicate")
     ap.add_argument("--part-minutes", type=float, default=15.0, help="length of each part file")
-    a = ap.parse_args()
+    return ap
 
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
 
+def process(a):
+    """Run the whole pipeline for a.video and return the output folder."""
+    global FFMPEG, FFPROBE
     video = os.path.abspath(a.video)
     if not os.path.isfile(video):
         die("video not found: " + video)
     FFMPEG, FFPROBE = find_tool("ffmpeg"), find_tool("ffprobe")
 
-    out_dir = os.path.abspath(a.out) if a.out else os.path.splitext(video)[0] + "_agent"
+    out_dir = os.path.abspath(a.out) if a.out else default_out_dir(video)
     frames_dir = os.path.join(out_dir, "frames")
     parts_dir = os.path.join(out_dir, "parts")
     for d in (frames_dir, parts_dir):
@@ -448,7 +455,22 @@ def main():
         source=source, source_note=note))
 
     log("done -> " + out_dir)
-    log('next: cd into that folder and run:  claude "Follow AGENT_PROMPT.md"')
+    log("%d screenshots, %d transcript segments" % (len(frames), len(segs)))
+    return out_dir
+
+
+def main():
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+    a = build_parser().parse_args()
+    if a.video:
+        process(a)
+        log('next: cd into that folder and run:  claude "Follow AGENT_PROMPT.md"')
+    else:
+        from .tui import run_menu
+        run_menu(a)
 
 
 if __name__ == "__main__":

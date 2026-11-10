@@ -73,3 +73,18 @@ def test_blocks_attach_lines_to_the_frame_on_screen():
               {"time": 20.0, "file": "b.jpg", "reason": "scene"}]
     blocks = cli.build_blocks(frames, [seg(0, 6, "early"), seg(21, 25, "late")])
     assert [[s["text"] for s in b["lines"]] for b in blocks] == [["early"], ["late"]]
+
+
+def test_output_goes_to_data_folder_named_after_the_video():
+    import os
+    out = cli.default_out_dir(r"C:\Videos\My Talk (2026).final.mp4")
+    assert os.path.dirname(out) == cli.DATA_DIR
+    assert os.path.basename(out) == "My Talk (2026).final"
+    assert os.path.basename(cli.DATA_DIR) == "data"
+
+
+def test_banner_rows_line_up_and_fit_the_box():
+    from video2agent import tui
+    rows = tui.banner_lines()
+    assert len(rows) == 5 and len({len(r) for r in rows}) == 1
+    assert len(rows[0]) + 2 <= tui.WIDTH - 4
