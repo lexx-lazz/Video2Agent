@@ -30,8 +30,9 @@ FFmpeg must be on PATH:
 
     winget install Gyan.FFmpeg
 
-Python dependencies install themselves into a project-local `.venv` the first
-time `run.bat` is used.
+You also need Python 3.9 or newer (tested on 3.9 and 3.12). The Python packages
+install themselves into a `.venv` folder inside the project the first time
+`run.bat` is used.
 
 ## Use
 
