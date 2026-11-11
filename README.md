@@ -135,5 +135,10 @@ with a comment saying what it does.
 
 ## Licence
 
-Copyright (c) 2026 lexx-lazz. All rights reserved. The code is public to read,
-but it is not licensed for reuse, redistribution or sale.
+Video2Agent is free to use, change and share for anything that isn't commercial:
+personal projects, study, research, schools, charities and the like. Selling it,
+or using it to make money, is not allowed without asking first.
+
+The full terms are the [PolyForm Noncommercial License 1.0.0](LICENSE).
+
+Required Notice: Copyright (c) 2026 lexx-lazz (https://github.com/lexx-lazz/Video2Agent)

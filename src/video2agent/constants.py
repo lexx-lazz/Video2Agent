@@ -4,7 +4,7 @@ Change a number here and every video processed after that uses it.
 """
 import os
 
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.2.1"
 BUILD_DATE = "2026-11-11"
 
 # Results go in data/ and queue logs in logs/, both inside the project folder
