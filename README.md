@@ -13,7 +13,7 @@ end to end and report what matters, with timestamps you can check.
 Every video gets one folder named after it, inside the project's `data` folder.
 Processing `talk.mp4` writes `data/talk/`, and that folder is everything an agent
 needs. You can group videos: each time you pick a video, a second window asks
-which folder to save in, so a course can live in `data/EE-337/talk/`.
+which folder to save in, so a course can live in `data/Physics/talk/`.
 
 | File | What |
 |---|---|
@@ -108,16 +108,32 @@ while a board that is being written on is captured again as it fills in.
 | `--force-whisper` | | ignore subtitle files and transcribe locally |
 | `--model` | `small` | `tiny`, `base`, `small`, `medium`, `large-v3` |
 | `--language` | `en` | spoken language code, or `auto` to detect it |
-| `--scene` | `0.3` | scene-change threshold; lower gives more frames |
-| `--silence-interval` | `30` | seconds between frames when nobody talks |
-| `--min-gap` | `2` | minimum seconds between frames |
-| `--min-segment` | `4` | merge transcript fragments shorter than this |
-| `--hash-dist` | `6` | how similar two frames must be to count as duplicates; lower keeps more |
-| `--width` | `1024` | screenshot width in pixels |
-| `--min-change` | `0.5` | percent of the picture that must change to keep a look-alike frame; lower keeps more |
 | `--queue` | | process the saved queue, then exit |
 | `--at HH:MM` | | wait until this time before starting a queue or batch |
-| `--part-minutes` | `15` | length of each part file |
 | `--dest FOLDER` | `data` | folder to save in; output goes to `FOLDER/<video name>/`. A plain name means a folder inside `data` |
 | `--out DIR` | | exact output folder, instead of `<dest>/<video name>/` |
 | `--version` | | print the version and build date |
+
+The numbers that decide how a video is cut up (how often to take a screenshot,
+how different two screenshots must be to keep both, how long a transcript line
+can be, how long each part is) are all in `src/video2agent/constants.py`, each
+with a comment saying what it does.
+
+## How the code is laid out
+
+| File | Job |
+|---|---|
+| `cli.py` | the command line; with no video named it opens the menu |
+| `menu.py` | the menu and the file explorer windows |
+| `pipeline.py` | one video from start to finish, in order |
+| `transcribe.py` | subtitle files, Whisper, and cutting speech into timed lines |
+| `screenshots.py` | when to take screenshots, taking them, dropping repeats |
+| `digest.py` | pairing lines with screenshots and writing the output folder |
+| `preview.py` | the preview page |
+| `video_queue.py` | the overnight queue |
+| `templates/` | the preview page and the agent instructions, as plain files |
+
+## Licence
+
+Copyright (c) 2026 lexx-lazz. All rights reserved. The code is public to read,
+but it is not licensed for reuse, redistribution or sale.
