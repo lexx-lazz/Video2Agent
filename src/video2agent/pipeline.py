@@ -5,7 +5,7 @@ import time
 
 from . import constants
 from .digest import write_folder
-from .helpers import fail, find_program, format_time, has_audio, log, video_length
+from .helpers import fail, find_ffmpeg, format_time, has_audio, log, video_length
 from .screenshots import find_scene_changes, pick_screenshot_times, remove_repeats, take_screenshots
 from .transcribe import find_subtitle_file, merge_short_lines, read_subtitles, transcribe_with_whisper
 
@@ -30,9 +30,8 @@ def process_video(video, dest=None, output_folder=None, subtitles=None,
     if not os.path.isfile(video):
         fail(f"video not found: {video}")
 
-    # Stop now with a clear message if FFmpeg isn't installed
-    find_program("ffmpeg")
-    find_program("ffprobe")
+    # Stop now with a clear message if FFmpeg can't be found
+    find_ffmpeg()
 
     folder = os.path.abspath(output_folder) if output_folder else output_folder_for(video, dest)
     frames_folder = os.path.join(folder, "frames")

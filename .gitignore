@@ -64,6 +64,8 @@ __pycache__/
 *.egg-info/
 .eggs/
 .venv/
+# uv and the Python it downloads on the first run of run.bat
+.runtime/
 venv/
 env/
 .pytest_cache/

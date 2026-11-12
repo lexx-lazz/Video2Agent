@@ -1,0 +1,9 @@
+# The packages Video2Agent uses. requirements.txt is made from this list with every
+# version pinned, so a fresh install always gets the exact set that was tested:
+#   uv pip compile requirements.in -o requirements.txt --python-version 3.12
+faster-whisper
+# PyAV 19 dropped an option faster-whisper uses to read audio, so transcription crashes with it
+av<19
+imageio-ffmpeg
+pillow
+imagehash

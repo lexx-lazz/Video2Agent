@@ -4,12 +4,12 @@ import re
 
 from .constants import (MIN_SECONDS_BETWEEN_SCREENSHOTS, NEW_WRITING_PERCENT, SAME_PICTURE_DISTANCE,
                         SCENE_CHANGE_THRESHOLD, SCREENSHOT_WIDTH, SILENCE_SCREENSHOT_EVERY)
-from .helpers import find_program, log, run_command
+from .helpers import find_ffmpeg, log, run_command
 
 
 def find_scene_changes(video, threshold=SCENE_CHANGE_THRESHOLD):
     """Times (seconds) where the picture changes sharply, like a new slide."""
-    result = run_command([find_program("ffmpeg"), "-hide_banner", "-nostats", "-i", video, "-an", "-sn",
+    result = run_command([find_ffmpeg(), "-hide_banner", "-nostats", "-i", video, "-an", "-sn",
                           "-vf", f"select='gt(scene,{threshold})',showinfo", "-f", "null", "-"])
     return [float(seconds) for seconds in re.findall(r"pts_time:\s*([0-9.]+)", result.stderr)]
 
@@ -62,7 +62,7 @@ def take_screenshots(video, times, frames_folder, width=SCREENSHOT_WIDTH):
             file_name = f"f_{int(moment):06d}_{index}.jpg"
         path = os.path.join(frames_folder, file_name)
 
-        result = run_command([find_program("ffmpeg"), "-hide_banner", "-loglevel", "error", "-y",
+        result = run_command([find_ffmpeg(), "-hide_banner", "-loglevel", "error", "-y",
                               "-ss", f"{moment:.3f}", "-i", video, "-frames:v", "1",
                               "-vf", f"scale={width}:-2", "-q:v", "3", path])
         if result.returncode == 0 and os.path.exists(path) and os.path.getsize(path) > 0:

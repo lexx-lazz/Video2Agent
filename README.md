@@ -26,13 +26,21 @@ which folder to save in, so a course can live in `data/Physics/talk/`.
 
 ## Setup
 
-FFmpeg must be on PATH:
+Nothing. Download the project, unzip it, and double-click `run.bat`.
 
-    winget install Gyan.FFmpeg
+The first run sets everything up by itself, which needs an internet connection:
+it downloads a small tool called uv, a private copy of Python 3.12 and the
+Python packages, which include FFmpeg. That takes a few minutes and about
+600 MB of disk. The first video you process also downloads the speech model,
+about 460 MB. After that it starts straight away and works offline.
 
-You also need Python 3.9 or newer (tested on 3.9 and 3.12). The Python packages
-install themselves into a `.venv` folder inside the project the first time
-`run.bat` is used.
+All of it lives in the project folder (`.runtime` and `.venv`), so the Python
+you may already have installed is never touched or used, and deleting the
+folder removes everything. Windows 10 (version 1803 or later) or Windows 11 is
+needed.
+
+If something goes wrong part way, for example the internet drops, just run it
+again and it picks up where it left off.
 
 ## Use
 

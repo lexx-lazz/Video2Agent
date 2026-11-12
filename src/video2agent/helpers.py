@@ -37,20 +37,30 @@ def run_command(command):
 
 
 @functools.lru_cache(maxsize=None)
-def find_program(name):
-    """Full path to ffmpeg or ffprobe."""
-    path = shutil.which(name)
+def find_ffmpeg():
+    """Full path to the ffmpeg program.
+
+    The copy that comes with the imageio-ffmpeg package is used first, so every PC runs the same
+    FFmpeg and nobody has to install it. One installed on the system is the fallback.
+    """
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        pass
+
+    path = shutil.which("ffmpeg")
     if path:
         return path
 
     # winget installs FFmpeg here, and a terminal opened before the install won't see it on PATH
     local_appdata = os.environ.get("LOCALAPPDATA")
     if local_appdata:
-        winget_path = os.path.join(local_appdata, "Microsoft", "WinGet", "Links", name + ".exe")
+        winget_path = os.path.join(local_appdata, "Microsoft", "WinGet", "Links", "ffmpeg.exe")
         if os.path.exists(winget_path):
             return winget_path
 
-    fail(f"{name} not found on PATH. Install FFmpeg (Windows: winget install Gyan.FFmpeg).")
+    fail("ffmpeg not found. Run: run.bat deps")
 
 
 def format_time(seconds, with_milliseconds=False, separator="."):
@@ -70,17 +80,29 @@ def format_time(seconds, with_milliseconds=False, separator="."):
     return f"{hours:02d}:{minutes:02d}:{whole:02d}{separator}{milliseconds:03d}"
 
 
+def open_video(video):
+    """Open a video with PyAV, FFmpeg's own libraries, which Whisper already needs."""
+    import av
+    try:
+        return av.open(video)
+    except Exception as error:
+        fail(f"could not read {video}\n{error}")
+
+
 def video_length(video):
     """How long the video is in seconds, read from the file's own metadata."""
-    result = run_command([find_program("ffprobe"), "-v", "error", "-show_entries", "format=duration",
-                          "-of", "default=nw=1:nk=1", video])
-    try:
-        return float(result.stdout.strip())
-    except ValueError:
-        fail(f"ffprobe could not read the duration of {video}\n{result.stderr.strip()}")
+    with open_video(video) as container:
+        if container.duration is not None:
+            return container.duration / 1_000_000  # PyAV counts in microseconds
+
+        # Some files only store a length per stream, so take the longest
+        lengths = [float(stream.duration * stream.time_base) for stream in container.streams
+                   if stream.duration is not None and stream.time_base is not None]
+    if not lengths:
+        fail(f"could not read the duration of {video}")
+    return max(lengths)
 
 
 def has_audio(video):
-    result = run_command([find_program("ffprobe"), "-v", "error", "-select_streams", "a",
-                          "-show_entries", "stream=index", "-of", "csv=p=0", video])
-    return bool(result.stdout.strip())
+    with open_video(video) as container:
+        return any(stream.type == "audio" for stream in container.streams)
